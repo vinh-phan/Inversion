@@ -1,0 +1,11 @@
+# macOS
+.DS_Store 
+
+# Environment/Paths
+*.env
+.env
+*.json 
+
+# Python cache 
+__pycache__/
+*.pyc
