@@ -260,7 +260,7 @@ def extract_weather(ERA5_folder, out_folder, years, num_processors=2):
         print(f"\n=== Processing year {year} ===")
         file_pairs = [
             (f"{ERA5_folder}/ERA5_temp_{year}_{month}.nc",
-             f"{ERA5_folder}/ERA5_weather_{year}.nc", 
+             f"{ERA5_folder}/ERA5_weather_{year}_{month}.nc", 
              f"{ERA5_folder}/ERA5_precip_{year}.nc", 
              )
             for month in months

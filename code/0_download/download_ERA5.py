@@ -56,20 +56,21 @@ CDS_KEYS = [k.strip() for k in os.environ["CDS_KEYS"].split(",") if k.strip()]
 
 key_cycle = cycle(CDS_KEYS)
 
-# Temperature task list
+# ERA5 temperature task list
 tasks_temp = [
     ("temperature", year, month, next(key_cycle), location, times, output_folder)
     for year in years
     for month in months
 ]
 
-# Weather task list 
+# ERA5 weather task list 
 tasks_weather = [
-    ("weather", year, months, next(key_cycle), location, times, output_folder)
+    ("weather", year, month, next(key_cycle), location, times, output_folder)
     for year in years
+    for month in months
 ]
 
-# Precipitation task list 
+# ERA5 precipitation task list 
 tasks_precip = [
     ("precipitation", year, months, next(key_cycle), location, times, output_folder)
     for year in years

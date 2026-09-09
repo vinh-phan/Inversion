@@ -157,8 +157,8 @@ def weather_download_cds(location, month, year, times, output_path, key):
     )
 
     # download & save the data
-    client.retrieve(dataset, request).download(f"{output_path}/ERA5_weather_{year}.nc") 
-    print(f"===== Finished downloading weather data for Year {year}. Saving to /{location}/ERA5_weather_{year}.nc")
+    client.retrieve(dataset, request).download(f"{output_path}/ERA5_weather_{year}_{month}.nc") 
+    print(f"===== Finished downloading weather data for Month {month} of Year {year}. Saving to /{location}/ERA5_weather_{year}_{month}.nc")
 
 
 ###########################################
@@ -264,7 +264,6 @@ def worker(data_type, year, month, key, location, times, output_folder):
             output_path=output_folder,
             key=key
         )
-
 
 
 
