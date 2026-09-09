@@ -24,7 +24,7 @@ import download as dl
 
 ###########################################
 ################## Define the parameters for download 
-years = [str(y) for y in range(2000, 2025)]
+years = [str(y) for y in range(2000, 2026)]
 
 location= [53.8, 3.2, 50.6, 7.4]
 
