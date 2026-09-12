@@ -1,7 +1,7 @@
 import cdsapi
 
 ###########################################
-################## Temperature download
+################## ERA5 temperature download
 def temp_download_cds(location, month, year, times, output_path, key):
     ''' Function to download temperature data from cds as NetCDF file.
         Saves: temperature data for %location% for %month% of %year% to {location}/ERA5_temp_{location}_{year}_{month}.nc
@@ -86,7 +86,7 @@ def temp_download_cds(location, month, year, times, output_path, key):
 
 
 ###########################################
-################## Weather download (excluding total precipitation)
+################## ERA5 weather download (excluding total precipitation)
 def weather_download_cds(location, month, year, times, output_path, key):
     ''' Function to download weather data from cds.
 
@@ -162,7 +162,7 @@ def weather_download_cds(location, month, year, times, output_path, key):
 
 
 ###########################################
-################## Precipitation download 
+################## ERA5 precipitation download 
 def precipitation_download_cds(location, month, year, times, output_path, key):
     ''' Function to download precipitation data from cds.
 
@@ -233,6 +233,63 @@ def precipitation_download_cds(location, month, year, times, output_path, key):
 
 
 ###########################################
+################## EAC4 air pollution download 
+def eac4_download_cds(location, year, times, output_path, key):
+    ''' Function to download EAC4 air pollution data from cds.
+
+    Parameters:
+    -----------
+    location : str
+        Location to be downloaded
+    
+    year : str
+        Year to be downloaded
+        format: yyyy (e.g. 2020, 2021, ...)
+    
+    locations : dict
+        Dictionary containing the bounding box for each location.
+
+    times : dict
+        Dictionary containing the time range to be extracted, for each location.
+
+    output_path : str
+        Path to save the downloaded NetCDF files.
+
+    Returns:
+    --------
+    None
+        Saves the downloaded ZIP file to the specified path.
+    '''
+    print(f"-------------------- Downloading EAC4 PM data for Year {year} --------------------")
+    # 
+
+    # define the dataset and request body
+    dataset = "cams-global-reanalysis-eac4"
+    request = {
+        "variable": [
+            "particulate_matter_1um",
+            "particulate_matter_2.5um",
+            "particulate_matter_10um"
+        ],
+        "date": [f"{year}-01-01/{year}-12-31"],
+        
+        "time": times,
+        "data_format": "netcdf_zip",
+        "area": location
+    }
+
+    # establish connection to the CDS API
+    client = cdsapi.Client(
+        url = "https://ads.atmosphere.copernicus.eu/api", # Note that this URL is different from that for ERA5 
+        key = key 
+    )
+
+    # download & save the data
+    client.retrieve(dataset, request).download(f"{output_path}/EAC4_pm_{year}.nc") 
+    print(f"===== Finished downloading EAC4 PM data for Year {year}. Saving to /{location}/EAC4_pm_{year}.nc")
+
+
+###########################################
 ################## Create worker wrapper (to help with parallel processing with API keys)
 def worker(data_type, year, month, key, location, times, output_folder):
     if data_type == "temperature":
@@ -264,6 +321,15 @@ def worker(data_type, year, month, key, location, times, output_folder):
             output_path=output_folder,
             key=key
         )
+
+    elif data_type == "eac4_pm":
+            eac4_download_cds(
+                location=location,
+                year=year,
+                times=times,
+                output_path=output_folder,
+                key=key
+            )
 
 
 

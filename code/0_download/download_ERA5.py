@@ -35,18 +35,16 @@ months = [                              # Only for download of temperature data
             "10", "11", "12" 
             ]
 
-times = [ "00:00",     # Time is in UTC, downloading multiple times to convert to Dutch local times from 12AM to 6AM, 12PM, and 6PM
-    "01:00",
-    "02:00",
-    "03:00",
-    "04:00",
-    "05:00",
-    "10:00",
-    "11:00",
-    "16:00",
-    "17:00",
-    "22:00",
-    "23:00",]
+times = [    # Time is in UTC
+        "00:00", "01:00", "02:00",
+        "03:00", "04:00", "05:00",
+        "06:00", "07:00", "08:00",
+        "09:00", "10:00", "11:00",
+        "12:00", "13:00", "14:00",
+        "15:00", "16:00", "17:00",
+        "18:00", "19:00", "20:00",
+        "21:00", "22:00", "23:00"
+    ]
 
 ###########################################
 ################## Define API keys and tasks for parallelization 
@@ -77,7 +75,6 @@ tasks_precip = [
 ]
 
 tasks = tasks_temp + tasks_weather + tasks_precip
-
 
 ###########################################
 ################## Download data  
