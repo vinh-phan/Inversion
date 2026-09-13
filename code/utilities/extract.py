@@ -48,9 +48,9 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
     nc = netCDF4.Dataset(filepath_temperature, mode='r')
 
     # Extract variables from temperature file
-    lat = nc.variables['latitude'][:]  # 27
-    lon = nc.variables['longitude'][:]  # 33
-    valid_time = nc.variables['valid_time'][:]  # 744
+    lat = nc.variables['latitude'][:]  
+    lon = nc.variables['longitude'][:]  
+    valid_time = nc.variables['valid_time'][:]  
     level = nc.variables['pressure_level'][:]  
     n_levels = len(level)
     t_arr_flat = nc.variables['t'][:,:n_levels].flatten() 
@@ -81,7 +81,7 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
     nc = netCDF4.Dataset(filepath_weather, mode='r')
 
     # Load full time column
-    valid_time = nc.variables['valid_time'][:] #744
+    valid_time = nc.variables['valid_time'][:] 
 
     # Extract index location of time range based on min/max of temperature data
     # (Only extract weather data for time range that is needed)
@@ -125,7 +125,7 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
     nc = netCDF4.Dataset(filepath_precipitation, mode='r')
 
     # Load full time column
-    valid_time = nc.variables['valid_time'][:] #744
+    valid_time = nc.variables['valid_time'][:] 
 
     # Extract index location of time range based on min/max of temperature data
     # (Only extract weather data for time range that is needed)
@@ -136,8 +136,8 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
         to_index = None
 
     # Extract variables from weather file
-    lat = nc.variables['latitude'][:] #27
-    lon = nc.variables['longitude'][:] #33
+    lat = nc.variables['latitude'][:] 
+    lon = nc.variables['longitude'][:] 
     valid_time = nc.variables['valid_time'][from_index:to_index]
     tp_arr_flat = nc.variables["tp"][from_index:to_index].flatten()
 
@@ -159,7 +159,7 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
 
     # ----------------- Compute pressure levels for comparison -----------------
 
-    # -------------------------------------------------------------------------------- Important: lacking bin count for pressure levels in China and Peru
+    # -------------------------------------------------------------------------------- 
 
     '''
     If 800 > sp >= 775: temp @ 750 - t2m
@@ -216,6 +216,31 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
         how="inner"
     )
 
+# ----------------- Create fixed pressure level inversion variables -----------------
+    # Compare fixed pressure levels with 1000 hPa at each location and time.
+    keys = ["time", "lat", "lon"]
+    fixed_temperatures = df_temperature.group_by(keys).agg([
+        pl.col("Temperature").filter(pl.col("level") == pressure).first()
+        .alias(f"t_{pressure}")
+        for pressure in [1000, 925, 975, 950]
+    ])
+
+    difference_columns = []
+    for pressure in [925, 975, 950]:
+        name = f"t_dif_{pressure}_1000"
+        difference = pl.col(f"t_{pressure}") - pl.col("t_1000")
+        fixed_temperatures = fixed_temperatures.with_columns([
+            difference.alias(name),
+            (difference > 0).cast(pl.Int8).alias(f"{name}_indicator")
+        ])
+        difference_columns.extend([name, f"{name}_indicator"])
+
+    df_combined = df_combined.join(
+        fixed_temperatures.select(keys + difference_columns),
+        on=keys,
+        how="left"
+    )
+
     # ----------------- Add/Transform variables of interest -----------------
 
     # Columns for polynomial transformation
@@ -226,11 +251,25 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
         (pl.col("sp") / 100).alias("sp"),       # Convert pressure from Pa to hPa
         (pl.col("u10")**2 + pl.col("v10")**2).sqrt().alias("ws"), # Create wind speed
         (pl.col("t2m") - 273.15).alias("t2m"),
+        (pl.col("d2m") - 273.15).alias("d2m"),
         (pl.col("Temperature") - 273.15).alias("Temperature"),
         ((3 * np.pi / 2 - pl.arctan2(pl.col("v10"), pl.col("u10"))) % (2 * np.pi)).alias("wd") # Create wind direction
         ])
 
-    # Create thermal inversion indicators and add polynominal tranformations
+    # Relative humidity (%) uses Celsius temperatures; wd is stored in radians.
+    df_combined = df_combined.with_columns([
+        (100 * (
+            (17.625 * pl.col("d2m")) / (243.04 + pl.col("d2m"))
+            - (17.625 * pl.col("t2m")) / (243.04 + pl.col("t2m"))
+        ).exp()).alias("rh")
+    ] + [
+        ((pl.col("wd") >= np.deg2rad(start))
+         & (pl.col("wd") < np.deg2rad(start + 90)))
+        .cast(pl.Int8).alias(f"wd_{start}_{start + 90}_indicator")
+        for start in [0, 90, 180, 270]
+    ])
+
+    # Create surface-to-pressure-level thermal inversion variables and add polynominal tranformations
     df_combined = df_combined.with_columns([
         (pl.col("Temperature") - pl.col("t2m")).alias("t_dif"),
         ((pl.col("Temperature") - pl.col("t2m")) > 0).cast(pl.Int8).alias("t_dif_indicator")     # Create the indicator column, 1 if t_dif > 0, else 0
@@ -274,7 +313,7 @@ def extract_weather(ERA5_folder, out_folder, years, num_processors=2):
         output = None  # free memory
 
         # Write to separate parquet file for each year
-        outpath = f"{out_folder}/ERA5_unmatched_{year}.parquet"
+        outpath = f"{out_folder}/ERA5_extracted_{year}.parquet"
         print(f"Writing {year} to {outpath}")
         df_year.write_parquet(outpath)
 
@@ -374,4 +413,5 @@ def extract_pollution(nc_path, source = "EAC4", lat_min = None, lat_max = None, 
         }
         })
 
+        nc.close()
         return df_pm_EAC
