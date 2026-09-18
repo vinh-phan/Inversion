@@ -9,3 +9,10 @@
 # Python cache 
 __pycache__/
 *.pyc
+
+# Testing files 
+download_ERA5_missing.py 
+AGGREGATION.md 
+check_extracted.py 
+test_aggregate.py 
+
