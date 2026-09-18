@@ -26,7 +26,7 @@ import download as dl
 ################## Define the parameters for download 
 years = [str(y) for y in range(2003, 2026)]
 
-location= [53.8, 3.2, 50.6, 7.4]
+location= [56, 2, 49, 9] # Bigger grid than for ERA5 because of sparser resolution. Needed to cover all municipality. 
 
 times = [ "00:00",     # Time is in UTC
     "03:00",
@@ -50,7 +50,6 @@ tasks_EAC4 = [
     ("eac4_pm", year, None, next(key_cycle), location, times, output_folder)
     for year in years
 ]
-
 
 ###########################################
 ################## Download data  
