@@ -2,6 +2,7 @@ import polars as pl
 import netCDF4
 import numpy as np
 import multiprocessing
+from datetime import datetime
 
 
 def _time_slice_indices(valid_time, from_time, to_time):
@@ -231,9 +232,10 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
         difference = pl.col(f"t_{pressure}") - pl.col("t_1000")
         fixed_temperatures = fixed_temperatures.with_columns([
             difference.alias(name),
+            difference.clip(lower_bound=0).alias(f"{name}_truncated"),
             (difference > 0).cast(pl.Int8).alias(f"{name}_indicator")
         ])
-        difference_columns.extend([name, f"{name}_indicator"])
+        difference_columns.extend([name, f"{name}_truncated", f"{name}_indicator"])
 
     df_combined = df_combined.join(
         fixed_temperatures.select(keys + difference_columns),
@@ -244,7 +246,7 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
     # ----------------- Add/Transform variables of interest -----------------
 
     # Columns for polynomial transformation
-    poly_columns = ['sp', 'tp', 'u10', 'v10', 'tcc', 'd2m', 'ws', 'wd']
+    poly_columns = ['sp', 'tp', 'u10', 'v10', 'tcc', 'd2m', 'ws', 'wd', 't2m']
 
     # Convert pressure, create wind speed and wind direction
     df_combined = df_combined.with_columns([
@@ -272,6 +274,7 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
     # Create surface-to-pressure-level thermal inversion variables and add polynominal tranformations
     df_combined = df_combined.with_columns([
         (pl.col("Temperature") - pl.col("t2m")).alias("t_dif"),
+        (pl.col("Temperature") - pl.col("t2m")).clip(lower_bound=0).alias("t_dif_truncated"),
         ((pl.col("Temperature") - pl.col("t2m")) > 0).cast(pl.Int8).alias("t_dif_indicator")     # Create the indicator column, 1 if t_dif > 0, else 0
     ] + [
         (pl.col(col_name) ** 2).alias(f"{col_name}_squared")     # Create a new column with the cubed value

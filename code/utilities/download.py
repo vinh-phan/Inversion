@@ -520,8 +520,8 @@ def eac4_download(location, year, times, output_path, key):
     )
 
     # download & save the data
-    client.retrieve(dataset, request).download(f"{output_path}/EAC4_pm_{year}.nc") 
-    print(f"===== Finished downloading EAC4 PM data for Year {year}. Saving to /{location}/EAC4_pm_{year}.nc")
+    client.retrieve(dataset, request).download(f"{output_path}/EAC4_pm_{year}.zip") 
+    print(f"===== Finished downloading EAC4 PM data for Year {year}. Saving to /{location}/EAC4_pm_{year}.zip")
 
 
 ###########################################
