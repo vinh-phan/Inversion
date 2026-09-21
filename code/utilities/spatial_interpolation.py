@@ -10,6 +10,7 @@ import polars as pl
 from pathlib import Path
 from scipy.sparse import csr_matrix
 from shapely.geometry import box
+from aggregate import prepare_time, compact_daily
 
 
 IDW_NEIGHBORS = 4
@@ -203,8 +204,16 @@ def aggregate_month(frame, grid, matrices, metadata, variables):
     # Convert IDs intp NumPy arrays for fast matrix operations
     time_ids, grid_ids = frame["time_id"].to_numpy(), frame["grid_id"].to_numpy()
 
-    # Create every combination of hour x municipalty
-    output = times.select("time").join(metadata, how="cross")
+    # Convert only the small table of distinct timestamps, after the UTC joins.
+    # This avoids timezone work per grid point, municipality, or variable.
+    # `time` is aware Dutch local time in the saved hourly data; `time_utc`
+    # retains the original instant for UTC-based daily inversion selections.
+    # The repeated autumn 02:00 hours have different offsets and remain distinct.
+    output_times = prepare_time(times.select("time")).select(
+        pl.col("time_local").alias("time"), "time_utc"
+    )
+    # Create every combination of hour x municipality in the same row order.
+    output = output_times.join(metadata, how="cross")
 
     # Create an empty list for the calculated weather columns
     columns = []
@@ -226,7 +235,7 @@ def aggregate_month(frame, grid, matrices, metadata, variables):
 
             # Add weighted variables to columns
             columns.append(pl.Series(
-                f"{variable}_{method}_mean", result.ravel(), nan_to_null=True
+                f"{variable}_{method}", result.ravel(), nan_to_null=True
             ))
     return output.with_columns(columns)
 
@@ -238,11 +247,16 @@ def process_files(
     file_pattern,
     output_prefix,
     include_area=True,
+    output_float32=True,
 ):
-    """Process any gridded Parquet dataset with time, lat, lon columns."""
+    """Process gridded UTC data, saving aware local time plus original UTC.
+
+
+    """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
-    files = sorted(input_dir.glob(file_pattern))
+    files = sorted(p for p in input_dir.glob(file_pattern)
+                   if p.is_file() and not p.name.startswith("."))
     if not files:
         raise FileNotFoundError(f"No files matching {file_pattern} in {input_dir}")
 
@@ -269,5 +283,6 @@ def process_files(
             print(f"Processing {path.name}: {month:%Y-%m}", flush=True)
             frame = source.filter(pl.col("time").dt.truncate("1mo") == month).collect()
             output = aggregate_month(frame, grid, matrices, metadata, variables)
-            output.write_parquet(output_dir / f"{output_prefix}_{month:%Y_%m}.parquet")
+            output = compact_daily(output, float32=output_float32)
+            output.write_parquet(output_dir / f"{output_prefix}_{month:%Y_%m}.parquet", compression="zstd")
             del frame, output

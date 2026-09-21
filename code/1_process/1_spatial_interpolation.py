@@ -36,6 +36,7 @@ def main():
             file_pattern=file_pattern,
             output_prefix=output_prefix,
             include_area=True,
+            output_float32=config.get("output_float32", True),
         )
 
 
