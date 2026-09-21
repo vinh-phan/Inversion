@@ -1,4 +1,8 @@
-"""Temporal aggregation of municipality weather; legacy pollution helpers below."""
+"""
+Temporal aggregation of municipality weather; legacy pollution helpers below.
+
+Created with Codex. 
+"""
 
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +25,7 @@ def prepare_time(df):
     """Retain UTC instants and derive local dates *after* IANA conversion.
 
     Naive input `time` is explicitly interpreted as UTC, as in the extraction
-    pipeline. Aware input is converted to UTC without changing the instant.
+    pipeline. Hourly files use aware local `time` plus `time_utc`. 
     Keeping both aware timestamps avoids ambiguous autumn wall-clock times:
     the repeated 02:00 hours remain distinct, while 03:00 occurs only once.
     Polars uses the timezone database, including historical CET/CEST changes;
@@ -30,7 +34,7 @@ def prepare_time(df):
     """
     schema = df.collect_schema()
     if "time" not in schema or not isinstance(schema["time"], pl.Datetime):
-        raise ValueError("Expected a Datetime 'time' column containing UTC observations.")
+        raise ValueError("Expected Datetime 'time': naive UTC or timezone-aware observations.")
     time = pl.col("time")
     utc = (time.dt.replace_time_zone("UTC") if schema["time"].time_zone is None
            else time.dt.convert_time_zone("UTC"))
@@ -40,22 +44,22 @@ def prepare_time(df):
 
 
 def _variable_name(column):
-    """Separate existing `<variable>_<spatial method>_mean` column names.
+    """Recognize `<variable>_<method>`.
 
     Methods are deliberately unrestricted (including names with underscores),
     so new spatial methods use exactly the same temporal aggregation rules.
     Unsuffixed variables are also accepted by the generic daily helper.
     """
-    pattern = (r"^(t_dif(?:_\d+_\d+)?(?:_indicator|_truncated)?"
+    pattern = (r"^(t_dif(?:_\d+_(?:\d+|2m))?(?:_indicator|_truncated)?"
                r"|wd_\d+_\d+_indicator|[A-Za-z][A-Za-z0-9]*(?:_squared|_cubed)?)"
-               r"(?:_(.+)_mean)?$")
-    match = re.fullmatch(pattern, column)
+               r"(?:_(.+))?$")
+    match = re.fullmatch(pattern, _output_base(column))
     return match.group(1) if match else column
 
 
 def _output_base(column):
-    # The terminal 'mean' describes spatial averaging in hourly files. Daily
-    # files retain the method and replace that suffix with the temporal rule.
+    # Remove the spatial 'mean' suffix from legacy hourly files only. New
+    # hourly names already end with the method; daily names add a temporal rule.
     return column[:-5] if column.endswith("_mean") else column
 
 
@@ -65,32 +69,93 @@ def weather_expressions(columns, precipitation_variables=("tp",)):
     Precipitation is assumed to contain interval amounts, as supplied by the
     existing ERA5 extraction. We neither deaccumulate nor infer missing amounts.
     An entirely missing series has a missing sum, not a misleading zero.
-    Wind direction is stored in radians in this project: average unit vectors
-    around the circle and mark cancelling vectors missing. Its polynomial
-    transforms have no circular interpretation and are intentionally omitted.
-    U/V and existing wind-sector indicators still receive arithmetic means.
     """
     expressions = []
     for column in columns:
         variable, base = _variable_name(column), _output_base(column)
         if variable.startswith("t_dif"):
             continue
-        if variable in {"wd_squared", "wd_cubed"}:
+        if variable == "wd" or variable.startswith("wd_"):
             continue
         values = pl.col(column)
-        if variable == "wd":
-            sine, cosine = values.sin().mean(), values.cos().mean()
-            expressions.append(
-                pl.when((sine**2 + cosine**2).sqrt() > 1e-12)
-                .then(pl.arctan2(sine, cosine) % (2 * math.pi))
-                .alias(f"{base}_mean")
-            )
-        else:
-            expressions.append(values.mean().alias(f"{base}_mean"))
+        expressions.append(values.mean().alias(f"{base}_mean"))
         if variable in precipitation_variables:
             expressions.append(pl.when(values.count() > 0).then(values.sum()).alias(f"{base}_sum"))
         expressions.append(values.count().alias(f"{base}_n"))
     return expressions
+
+
+def add_wind_direction(df):
+    """Derive meteorological wind direction from each method's daily mean U/V.
+
+    Retain the project's radians convention: 0 = from north, pi/2 = from east,
+    increasing clockwise. This is the direction of the mean wind vector, not
+    the mean of hourly directions. Each component retains its own available-
+    observation mean/count. If either mean is absent/nonfinite or the resultant
+    speed is <= 1e-12 m/s (including numerical cancellation), direction and all
+    bins are null. Four half-open sectors cover [0, 2*pi) without overlap.
+    The familiar _mean suffix is retained for compatibility with daily columns;
+    the new sector columns contain binary Int8 dummies, never hourly shares.
+    """
+    directions = []
+    bins = []
+    for column in df.columns:
+        if not re.fullmatch(r"u10(?:_.+)?_mean", column):
+            continue
+        suffix = column[3:]  # _<method>_mean, or _mean for unsuffixed input.
+        v_column = f"v10{suffix}"
+        if v_column not in df.columns:
+            raise ValueError(f"Wind direction requires {v_column} alongside {column}.")
+        u, v = pl.col(column), pl.col(v_column)
+        direction = f"wd{suffix}"
+        valid = u.is_finite() & v.is_finite() & ((u**2 + v**2).sqrt() > 1e-12)
+        directions.append(pl.when(valid)
+                          .then((3 * math.pi / 2 - pl.arctan2(v, u)) % (2 * math.pi))
+                          .alias(direction))
+        for start in [0, 90, 180, 270]:
+            bins.append(((pl.col(direction) >= math.radians(start))
+                         & (pl.col(direction) < math.radians(start + 90)))
+                        .cast(pl.Int8).alias(f"wd_{start}_{start + 90}_indicator{suffix}"))
+    return df.with_columns(directions).with_columns(bins)
+
+
+def compact_daily(df, significant_figures=None, float32=True):
+    """Reduce output size only AFTER all means, thresholds, and bins are computed.
+
+    Significant figures preserve small precipitation amounts and their powers;
+    fixed decimal places could turn them into zeros. Six figures bound decimal
+    rounding error to about 5e-6 relative (0.0005%). Float32 adds approximately
+    6e-8 relative error for normal values and halves floating-point storage.
+    Retain Float64 for columns outside Float32's normal range to avoid overflow
+    or loss of relative precision in subnormal values. Metadata, diagnostics,
+    integers, and wind angles are untouched; keeping angles at full precision
+    preserves their [0, 2*pi) range and agreement with exact sector boundaries.
+    Set significant_figures=None and float32=False for full-precision output.
+    """
+    if significant_figures is not None and (isinstance(significant_figures, bool)
+            or not isinstance(significant_figures, int) or not 1 <= significant_figures <= 15):
+        raise ValueError("output_significant_figures must be null or an integer from 1 to 15.")
+    if not isinstance(float32, bool):
+        raise ValueError("output_float32 must be true or false.")
+    columns = [name for name, dtype in df.schema.items()
+               if dtype.is_float() and name not in METADATA + ["dawn_offset_minutes"]
+               and not name.startswith("wd_")]
+    if significant_figures is not None:
+        df = df.with_columns([pl.col(name).round_sig_figs(significant_figures) for name in columns])
+    if float32 and columns:
+        # Check ranges together rather than scanning the frame once per column.
+        ranges = df.select([
+            expression for name in columns for expression in (
+                pl.col(name).abs().filter(pl.col(name).is_finite() & (pl.col(name) != 0))
+                .min().alias(f"{name}_min"),
+                pl.col(name).abs().filter(pl.col(name).is_finite()).max().alias(f"{name}_max"),
+            )
+        ]).row(0, named=True)
+        safe = [name for name in columns
+                if (ranges[f"{name}_min"] is None or ranges[f"{name}_min"] >= 1.1754943508222875e-38)
+                and (ranges[f"{name}_max"] is None or ranges[f"{name}_max"] <= 3.4028234663852886e38)]
+        df = df.with_columns([pl.col(name).cast(pl.Float32) for name in safe])
+    return df
 
 
 def time_selection(variant):
@@ -235,11 +300,12 @@ def aggregate_daily(df, group_columns=("gemeentecode",), dawn_max_minutes=60,
     expressions += [pl.col(name).first() for name in metadata]
     expressions += weather_expressions(columns, precipitation_variables)
     expressions += inversion_expressions(columns)
-    return df.group_by(keys).agg(expressions).sort(keys)
+    return add_wind_direction(df.group_by(keys).agg(expressions).sort(keys))
 
 
 def aggregate_files(input_dir, output_dir, file_pattern="municipality_*.parquet",
-                    output_prefix="municipality", dawn_max_minutes=60):
+                    output_prefix="municipality", dawn_max_minutes=60,
+                    output_significant_figures=None, output_float32=True):
     """Keep the existing wide, monthly Parquet layout, partitioned by LOCAL month.
 
     Scan all file timestamps to discover local months, then push each month's
@@ -247,13 +313,16 @@ def aggregate_files(input_dir, output_dir, file_pattern="municipality_*.parquet"
     midnight/month/year boundaries without loading the whole archive at once.
     Partial first/last days are retained and reported through n_obs.
     """
-    files = sorted(Path(input_dir).glob(file_pattern))
+    files = sorted(p for p in Path(input_dir).glob(file_pattern)
+                   if p.is_file() and not p.name.startswith(".")
+                   and not p.name.endswith("_all.parquet"))
     if not files:
         raise FileNotFoundError(f"No files matching {file_pattern} in {input_dir}")
     if Path(input_dir).resolve() == Path(output_dir).resolve():
         raise ValueError("Daily output directory must differ from hourly input directory.")
     source = pl.scan_parquet(files)
     prepared = prepare_time(source)
+    source_timezone = source.collect_schema()["time"].time_zone
     months = (prepared.select(pl.col("time_local").dt.date().dt.truncate("1mo").alias("month"))
               .unique().sort("month").collect())
     output_dir = Path(output_dir)
@@ -265,14 +334,17 @@ def aggregate_files(input_dir, output_dir, file_pattern="municipality_*.parquet"
         end = datetime(month.year + (month.month == 12), month.month % 12 + 1, 1,
                        tzinfo=ZoneInfo(LOCAL_TIMEZONE))
         # Filter the original timestamp so Parquet row-group statistics can
-        # prune files; bounds represent local midnights expressed in UTC.
-        bounds = [value.astimezone(ZoneInfo("UTC")) for value in (start, end)]
-        if source.collect_schema()["time"].time_zone is None:
+        # prune files. Match the source column's timezone: legacy naive UTC
+        # files and new aware local files must select exactly the same instants.
+        bounds = [value.astimezone(ZoneInfo(source_timezone or "UTC"))
+                  for value in (start, end)]
+        if source_timezone is None:
             bounds = [value.replace(tzinfo=None) for value in bounds]
         frame = source.filter((pl.col("time") >= bounds[0]) & (pl.col("time") < bounds[1])).collect()
         output = aggregate_daily(frame, dawn_max_minutes=dawn_max_minutes)
         target = output_dir / f"{output_prefix}_{month:%Y_%m}.parquet"
-        output.write_parquet(target)
+        output = compact_daily(output, output_significant_figures, output_float32)
+        output.write_parquet(target, compression="zstd")
         print(f"{target.name}: {output.height} municipality-days; "
               f"observations/day {output['n_obs'].min()}–{output['n_obs'].max()}; "
               f"{output.width} columns", flush=True)
