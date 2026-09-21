@@ -9,6 +9,7 @@
 # Python cache 
 __pycache__/
 *.pyc
+test_*.py
 
 # Testing files 
 download_ERA5_missing.py 

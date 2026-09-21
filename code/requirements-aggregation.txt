@@ -1,3 +1,5 @@
 # Dependencies for 1_process/2_aggregation.py 
 polars>=1.30,<2
 astral>=3.2,<4
+
+pyarrow>=16
