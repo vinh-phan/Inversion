@@ -237,56 +237,61 @@ def extract_and_compute(filepath_temperature, filepath_weather, filepath_precipi
         ])
         difference_columns.extend([name, f"{name}_truncated", f"{name}_indicator"])
 
+    surface_levels = [925, 950, 975]
+    surface_columns = [f"t_{pressure}" for pressure in surface_levels]
     df_combined = df_combined.join(
-        fixed_temperatures.select(keys + difference_columns),
+        fixed_temperatures.select(keys + difference_columns + surface_columns),
         on=keys,
         how="left"
     )
 
+    # Fixed pressure-level comparisons with 2-metre air temperature, independently of
+    # the pressure level selected for the original t_dif measure. Both inputs
+    # are still Kelvin here, so their difference also equals the Celsius
+    # difference. Treat NaN as missing before comparison: it must not become
+    # an observed inversion indicator. Nulls propagate through all three forms.
+    for pressure in surface_levels:
+        name = f"t_dif_{pressure}_2m"
+        difference = pl.col(f"t_{pressure}").fill_nan(None) - pl.col("t2m").fill_nan(None)
+        df_combined = df_combined.with_columns([
+            difference.alias(name),
+            difference.clip(lower_bound=0).alias(f"{name}_truncated"),
+            (difference > 0).cast(pl.Int8).alias(f"{name}_indicator"),
+        ])
+    df_combined = df_combined.drop(surface_columns)
+
     # ----------------- Add/Transform variables of interest -----------------
 
-    # Columns for polynomial transformation
-    poly_columns = ['sp', 'tp', 'u10', 'v10', 'tcc', 'd2m', 'ws', 'wd', 't2m']
-
-    # Convert pressure, create wind speed and wind direction
+    # Convert pressure and create wind speed. Direction is derived from daily
+    # municipality u10/v10 means after spatial and temporal aggregation.
     df_combined = df_combined.with_columns([
         (pl.col("sp") / 100).alias("sp"),       # Convert pressure from Pa to hPa
         (pl.col("u10")**2 + pl.col("v10")**2).sqrt().alias("ws"), # Create wind speed
         (pl.col("t2m") - 273.15).alias("t2m"),
         (pl.col("d2m") - 273.15).alias("d2m"),
         (pl.col("Temperature") - 273.15).alias("Temperature"),
-        ((3 * np.pi / 2 - pl.arctan2(pl.col("v10"), pl.col("u10"))) % (2 * np.pi)).alias("wd") # Create wind direction
         ])
 
-    # Relative humidity (%) uses Celsius temperatures; wd is stored in radians.
+    # Relative humidity (%) uses Celsius temperatures.
     df_combined = df_combined.with_columns([
         (100 * (
             (17.625 * pl.col("d2m")) / (243.04 + pl.col("d2m"))
             - (17.625 * pl.col("t2m")) / (243.04 + pl.col("t2m"))
         ).exp()).alias("rh")
-    ] + [
-        ((pl.col("wd") >= np.deg2rad(start))
-         & (pl.col("wd") < np.deg2rad(start + 90)))
-        .cast(pl.Int8).alias(f"wd_{start}_{start + 90}_indicator")
-        for start in [0, 90, 180, 270]
     ])
 
-    # Create surface-to-pressure-level thermal inversion variables and add polynominal tranformations
+    # Create surface-to-pressure-level thermal inversion variables.
+    # Regression polynomial controls can be constructed from daily measures later.
     df_combined = df_combined.with_columns([
         (pl.col("Temperature") - pl.col("t2m")).alias("t_dif"),
         (pl.col("Temperature") - pl.col("t2m")).clip(lower_bound=0).alias("t_dif_truncated"),
         ((pl.col("Temperature") - pl.col("t2m")) > 0).cast(pl.Int8).alias("t_dif_indicator")     # Create the indicator column, 1 if t_dif > 0, else 0
-    ] + [
-        (pl.col(col_name) ** 2).alias(f"{col_name}_squared")     # Create a new column with the cubed value
-        for col_name in poly_columns
-
-    ] + [
-        (pl.col(col_name) ** 3).alias(f"{col_name}_cubed")  # Create a new column with the squared value
-        for col_name in poly_columns
     ])
 
-    # Remove original temperature and level columns
-    df_combined = df_combined.drop(['level'])
+    # Remove the raw pressure-level temperature column from the hourly data.
+    # It is used only to derive the inversion terms above and is not needed in
+    # the final hourly files we aggregate downstream.
+    df_combined = df_combined.drop(['level', 'Temperature'])
 
     # Return final dataframe
     return(df_combined)
