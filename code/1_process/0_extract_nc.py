@@ -27,6 +27,7 @@ data_in_path = Path(config["ERA5_raw"])
 data_out_path = Path(config["ERA5_extracted"])
 eac4_in_path = Path(config["EAC4_raw"])
 eac4_out_path = Path(config["EAC4_extracted"])
+EAC4_KG_M3_TO_UG_M3 = 1e9
 
 
 def extract_eac4():
@@ -38,6 +39,10 @@ def extract_eac4():
         frames.append(extract.extract_pollution(str(filepath), source="EAC4"))
 
     df_eac4 = pl.concat(frames).sort(["time", "lat", "lon"])
+    pollution_columns = [column for column in df_eac4.columns if column.startswith("pm")]
+    df_eac4 = df_eac4.with_columns(
+        [(pl.col(column) * EAC4_KG_M3_TO_UG_M3).alias(column) for column in pollution_columns]
+    )
     outpath = eac4_out_path / "EAC4.parquet"
     df_eac4.write_parquet(outpath)
     print(f"Wrote {df_eac4.height:,} rows to {outpath}")
