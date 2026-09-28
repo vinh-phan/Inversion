@@ -6,10 +6,21 @@
 .env
 *.json 
 
-# Python cache 
+# Cache 
 __pycache__/
 *.pyc
 test_*.py
+*.Rhistory
+
+# Datafiles 
+*.parquet
+*.png
+*.pdf
+*.csv
+
+# Markdown files 
+*.md 
+*.html
 
 # Testing files 
 download_ERA5_missing.py 
