@@ -35,13 +35,16 @@ def temporary_output(path):
 
 
 def concatenate_parquet_files(input_dir, output_file, file_pattern="*.parquet",
-                              *, output_float32=True, batch_size=8192):
+                              *, output_float32=True, batch_size=8192,
+                              exclude_columns_containing=()):
     """Project counts away, compact floats, and write batches; return a Path.
 
     Preflight numeric ranges with streaming reductions so every batch uses the
     same schema. As in daily aggregation, keep metadata, wind directions and
     values outside Float32's normal range at their original precision.
     Never materialize the combined data. Publish only a completed output file.
+    Optionally exclude column names containing any supplied substring before
+    range checks and batch reads; source files remain unchanged.
     """
     output_file = Path(output_file)
     files = [p for p in parquet_files(input_dir, file_pattern)
@@ -51,7 +54,8 @@ def concatenate_parquet_files(input_dir, output_file, file_pattern="*.parquet",
     schemas = []
     for path in files:
         schema = pl.read_parquet_schema(path)
-        names = [n for n in schema if not observation_count(n)]
+        names = [n for n in schema if not observation_count(n)
+                 and not any(part in n for part in exclude_columns_containing)]
         candidates = [n for n in names if schema[n] == pl.Float64
                       and n not in METADATA + ["dawn_offset_minutes"]
                       and not n.startswith("wd_")]
