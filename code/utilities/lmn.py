@@ -396,8 +396,8 @@ def run(config, skip_audit=False):
 
 README = """# LMN daily municipality estimates
 
-Concentrations are **µg/m³**, unlike existing EAC4 files (kg/m³). Multiply EAC4 by
-1e9 for comparisons. Municipality boundaries are fixed at 2025. Dates are Dutch
+Concentrations are **µg/m³** for LMN and for EAC4 after the extraction step.
+Municipality boundaries are fixed at 2025. Dates are Dutch
 civil days (Europe/Amsterdam), assigned using measurement interval start times.
 All municipalities and dates in 2000–2025 are included. PM2.5 before 2014 is null:
 the 2008–2013 daily samples cannot be aligned exactly to civil days and are audited
