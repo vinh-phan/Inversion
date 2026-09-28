@@ -181,8 +181,8 @@ def inversion_expressions(columns):
 
     No inversion is recomputed from an interpolated temperature difference.
     Spatially averaged indicators can be fractional shares: exact-time/dawn
-    variants retain those shares. Multi-observation variants report whether
-    *any* available share is positive. Strength includes all nonmissing values,
+    variants retain those shares. Multi-observation variants average available
+    shares. Strength includes all nonmissing values,
     including zeros (and negative values in the existing raw differences).
     Empty/all-null selections remain null, distinguished from observed zero;
     per-variable counts make that distinction auditable.
@@ -196,8 +196,7 @@ def inversion_expressions(columns):
         for variant in INVERSION_VARIANTS:
             values = pl.col(column).filter(time_selection(variant))
             if variant in {"all", "6h_local", "6h_utc"}:
-                value = (pl.when(values.count() > 0).then((values > 0).any().cast(pl.Int8))
-                         if indicator else values.mean())
+                value = values.mean()
             else:
                 value = values.first()
             expressions.extend([

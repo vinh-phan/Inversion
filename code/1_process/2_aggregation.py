@@ -51,15 +51,22 @@ def main():
 
         if SKIP_CONCAT:
             continue
-        hourly_dir = Path(config[f"{dataset}_municipality_hourly"])
-        hourly_out = Path(config[f"{dataset}_processed"]) / f"{dataset}_municipality_hourly_all.parquet"
-        concatenate_parquet_files(hourly_dir, hourly_out, file_pattern=file_pattern,
-                                  output_float32=config.get("output_float32", True))
+        #hourly_dir = Path(config[f"{dataset}_municipality_hourly"])
+        #hourly_out = Path(config[f"{dataset}_processed"]) / f"{dataset}_municipality_hourly_all.parquet"
+        # Exclude UTC-named columns from combined outputs only. Monthly files
+        # retain UTC timestamps and inversion variants for aggregation/reuse.
+        #concatenate_parquet_files(hourly_dir, hourly_out, file_pattern=file_pattern,
+        #                          output_float32=config.get("output_float32", True),
+        #                          exclude_columns_containing=("utc",))
 
         daily_dir = Path(config[f"{dataset}_municipality_daily"])
         daily_out = Path(config[f"{dataset}_processed"]) / f"{dataset}_municipality_daily_all.parquet"
         concatenate_parquet_files(daily_dir, daily_out, file_pattern=file_pattern,
-                                  output_float32=config.get("output_float32", True))
+                                  output_float32=config.get("output_float32", True),
+                                  exclude_columns_containing=("utc", "grid_area_coverage"))
+        # Concatenation automatically takes out n_obs column and columns ending with _n (indicating the number of observations available for daily aggregation). Then depending on the user, will 
+        # also remove any columns containing certain patterns in exclude_columns_containing argument. 
+        # No dawn observations for 2026-01-01 (so 343 missing obs for the concatenated daily files - 343 gemeente)
 
 # %% Run aggregation / concatenation
 if __name__ == "__main__":
